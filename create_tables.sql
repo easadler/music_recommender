@@ -36,18 +36,9 @@ where row_id IN (
 )
 LIMIT 10000;
 
-#get pivoted user table
-
-
-WITH sample AS (
-SELECT * FROM users_table 
-	WHERE userid IN (...)
-)
 
 
 ##### GET USA SUBSET ####
-
-
 
 CREATE TABLE usa_plays AS SELECT up.userid as userid, up.artist as artist , up.plays as plays FROM users as u
 	LEFT JOIN user_plays as up
@@ -56,9 +47,11 @@ CREATE TABLE usa_plays AS SELECT up.userid as userid, up.artist as artist , up.p
 
 ALTER TABLE usa_plays ADD COLUMN row_id SERIAL PRIMARY KEY;
 
+# num rows 3633110
 
 
-SELECT 3633110
+
+
 
 
 
@@ -66,35 +59,28 @@ SELECT 3633110
 SELECT COUNT(distinct(artist)) FROM usa_plays;
 112195
 
-######## MISC ############
-
-WITH temp as (
-SELECT userid FROM usa_plays 
-	GROUP BY plays
-	WHERE SUM(plays) > 100 and
-	COUNT(plays) > 10
-)
 
 ######## pivot table from random subset ##############
 
-CREATE TABLE temp as
-SELECT userid FROM usa_plays 
-	where row_id in 
-		(SELECT round(random() * 3.634e6)::integer as id FROM generate_series(1, 1000)) 
-	group by row_id 
-	limit 10000;
 
 
-CREATE TABLE sample as 
+CREATE TABLE sample as
+WITH temp as(
+	SELECT userid FROM usa_plays 
+		where row_id in 
+			(SELECT round(random() * 3.634e6)::integer as id FROM generate_series(1, 1000)) 
+		group by row_id 
+		limit 10000
+)
+
 SELECT temp.userid, usa_plays.artist, usa_plays.plays FROM usa_plays
 	LEFT JOIN temp
 	on temp.userid = usa_plays.userid
 	WHERE temp.userid IS NOT null;
 
+#SELECT string_agg(distinct artist || ' integer', ',') FROM sample group by artist ;
 
-SELECT string_agg(distinct artist || ' integer', ',') FROM sample group by artist ;
-
-
+######### FUNCTION ###################
 
 CREATE or REPLACE FUNCTION dynamic_pivot (tablename varchar, rowc varchar, colc varchar, valc varchar, celldatatype varchar) RETURNS varchar language plpgsql AS $$
 DECLARE
@@ -117,6 +103,7 @@ END;
 $$;
 
 
+#### FUNCTION EXAMPLE #######
 SELECT dynamic_pivot('sample','userid','artist','plays','integer');
 SELECT * FROM results;
 
@@ -125,24 +112,5 @@ SELECT * FROM results;
 # reset psql
 SELECT pg_reload_conf();
 
-'''
-command line stuff:
-
-# line counts
-wc -l usersha1-artmbid-artname-plays.tsv
-wc -l usersha1-profile.tsv
-
-
-
-# find matching lines causing problems
-sed -n '/sep 20, 2008/p' usersha1-artmbid-artname-plays.tsv
-sed '/sep 20, 2008/d' usersha1-artmbid-artname-plays.tsv > new_ratings.tsv
-
-## adds line number
-
-sed -i.bak '/sep 20, 2008/d' ratings.tsv 
-perl -pi -e 's/[[:^ascii:]]//g' ratings.tsv
-sed -i.bak 's/\"//g' ratings.tsv
-'''
 
 
