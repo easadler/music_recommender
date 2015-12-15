@@ -12,148 +12,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from scipy.cluster.hierarchy import linkage, fcluster
 
 
-class CWHC(BaseEstimator, TransformerMixin):
-    """Column-wise hierarchical clustering (CWHC)
-    Column-wise hierarchical clustering of the
-    data based on a threshold, which project the columns to a lower dimensional space.
-    This implementation uses the scipy.cluster.hierarchy.linkage implementation hierachical clustering.
-    It only works for dense arrays and is not scalable to large dimensional data.
-    The time complexity of this implementation is ``O(n ** 3)`` assuming
-    scipy's implementation uses the standard agglomerative clustering algorithm.
-
-    Parameters
-    ----------
-    names : array (strings, ints), None
-        Column names to be combined based on hierarchical clustering.
-        if names is not set:
-            names = np.arrange(n_features)
-    thresh: float, None
-        The threshold to apply when forming flat clusters in scipy's fcluster
-
-    Notes
-    -----
-    For n_components='mle', this class uses the method of `Thomas P. Minka:
-    Automatic Choice of Dimensionality for PCA. NIPS 2000: 598-604`
-    Implements the probabilistic PCA model from:
-    M. Tipping and C. Bishop, Probabilistic Principal Component Analysis,
-    Journal of the Royal Statistical Society, Series B, 61, Part 3, pp. 611-622
-    via the score and score_samples methods.
-    See http://www.miketipping.com/papers/met-mppca.pdf
-    Due to implementation subtleties of the Singular Value Decomposition (SVD),
-    which is used in this implementation, running fit twice on the same matrix
-    can lead to principal components with signs flipped (change in direction).
-    For this reason, it is important to always use the same estimator object to
-    transform data in a consistent fashion.
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from sklearn.decomposition import PCA
-    >>> X = np.array([[-1, -1], [-2, -1], [-3, -2], [1, 1], [2, 1], [3, 2]])
-    >>> pca = PCA(n_components=2)
-    >>> pca.fit(X)
-    PCA(copy=True, n_components=2, whiten=False)
-    >>> print(pca.explained_variance_ratio_) # doctest: +ELLIPSIS
-    [ 0.99244...  0.00755...]
-    See also
-    --------
-    RandomizedPCA
-    KernelPCA
-    SparsePCA
-    TruncatedSVD
-    """
-
-    def __init__(self, names=None, thresh=0.5):
-        self.names = names
-        self.threshold = thresh
-
-    def fit(self, X, y=None):
-        """Fit the model with X.
-        Parameters
-        ----------
-        X: array-like, shape (n_samples, n_features)
-            Training data, where n_samples in the number of samples
-            and n_features is the number of features.
-        Returns
-        -------
-        self : object
-            Returns the instance itself.
-        """
-        self._fit(X)
-        return self
-
-    def fit_transform(self, X, y=None):
-        """Fit the model with X and apply the column-wise dimensionality reduction on X.
-        Parameters
-        ----------
-        X : array-like, shape (n_samples, n_features)
-            Training data, where n_samples is the number of samples
-            and n_features is the number of features.
-        Returns
-        -------
-        X_new : array-like, shape (n_samples, n_components)
-        """
-        X_new = self._fit(X)
-
-        return X_new
-
-    def transform(self, X):
-        """Apply the clumn-wise dimensionality reduction on X.
-        X columns are grouped into the clusters previous extracted
-        from a training set.
-        Parameters
-        ----------
-        X : array-like, shape (n_samples, n_features)
-            New data, where n_samples is the number of samples
-            and n_features is the number of features.
-        Returns
-        -------
-        X_new : array-like, shape (n_samples, n_components)
-        """
-        if self.X_new:
-            return self.X_new
-
-    def _fit(self, X):
-        """Fit the model on X
-        Parameters
-        ----------
-        X: array-like, shape (n_samples, n_features)
-            Training vector, where n_samples in the number of samples and
-            n_features is the number of features.
-        Returns
-        -------
-        X_new : array-like, shape (n_samples, n_features)
-            The columns-wise clustering of the input data, copied and centered when
-            requested.
-        """
-        col_ind = np.arange(X.shape[1])
-
-        if not self.names:
-            self.names = col_ind
-
-        # cluster and get assignments
-        link = linkage(X.T, method='complete', metric='cosine')
-        assignments = fcluster(link, self.thresh, 'distance')
-
-        dic = defaultdict(list)
-
-        # create dictionary of indexes based on assignment
-        # reindex assinments to be zero-based
-        for a, i in zip(assignments - 1, col_ind):
-            dic[a].append(i)
-
-        # initialize matrix with combined features and names array
-        self.X_new = np.zeros((X.shape[0], len(dic)))
-        self.new_names = []
-
-        # create new columns from mean of cluster groups
-        for k, v in dic.iteritems():
-            self.new_names.append(str(self.names[v]))
-            self.X_new[:, k] = np.mean(X[:, v], axis=1)
-
-        return self.X_new
-
-
 class ReduceFeatures(object):
     """Make 2d or 3d plots of principle components from scikit learn's PCA or
     SparsePCA models. Option to use scikit learn's KMeans model to color observations.
@@ -173,7 +31,7 @@ class ReduceFeatures(object):
         must be square. X may be a sparse matrix, in which case only "nonzero"
         elements may be considered neighbors for DBSCAN."""
 
-    def __init__(self, model=None, scaler=None, cluster_model=False, col_cluster_thresh=None):
+    def __init__(self, model=None, scaler=None, cluster_model=False, thresh=0.5):
         '''
             Set self.names and do preprocess data for dimension
             reduction.
@@ -181,54 +39,71 @@ class ReduceFeatures(object):
         self.model = model
         self.scaler = scaler
         self.cluster_model = cluster_model
-        self.col_cluster_thresh = 0.1
+        self.thresh = thresh
 
-        if col_cluster_thresh:
-            self.pipeline = Pipeline([('scaler', self.scaler), ('col_clust_model', self.CWHC), ('model', self.model)])
+        if cluster_model:
+            self.pipeline = Pipeline([('cluster_model', CWHC(thresh=0.5)), ('scaler', self.scaler), ('model', self.model)])
         else:
             self.pipeline = Pipeline([('scaler', self.scaler), ('model', self.model)])
 
-    def fit(self, X):
-        self.X = self.pipeline(X)
+    def fit(self, X, names=None):
+        """Fit the model with X.
+        Parameters
+        ----------
+        X: array-like, shape (n_samples, n_features)
+            Training data, where n_samples in the number of samples
+            and n_features is the number of features.
+        Returns
+        -------
+        self : object
+            Returns the instance itself.
+        """
+        self.pipeline['cluster_model'].names = names
+        self._fit(X)
+        return self
 
-    def fit_transform(self, X):
-        return self.model.fit_transform(X)
+    def _fit(self, X):
+        self.X_new = self.pipeline.fit_transform(X)
+        return self.X_new
 
-    def preprocessing(self, non_na_thresh=None, na_fill_char=None):
-        if non_na_thresh is None:
-            non_na_thresh = 0
-        mask = (self.df.dtypes == np.float64) | (self.df.dtypes == np.int_)
-        df_sub = self.df.ix[:, mask]
-        df_sub = df_sub.dropna(axis=1, thresh=int(self.df.shape[1] * non_na_thresh))
+    def fit_transform(self, X, names=None):
+        """Fit the model with X and apply the column-wise dimensionality reduction on X.
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            Training data, where n_samples is the number of samples
+            and n_features is the number of features.
+        Returns
+        -------
+        X_new : array-like, shape (n_samples, n_components)
+        """
+        self.fit(X)
+        return self.X_new
 
-        if na_fill_char:
-            df_sub = df_sub.fillna(na_fill_char)
+    def transform(self, X):
+        """Apply the clumn-wise dimensionality reduction on X.
+        X columns are grouped into the clusters previous extracted
+        from a training set.
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            New data, where n_samples is the number of samples
+            and n_features is the number of features.
+        Returns
+        -------
+        X_new : array-like, shape (n_samples, n_components)
+        """
+        if self.X_new:
+            self.X_new = self.pipline.transform(X)
+            return self.X_new
 
-        imp = preprocessing.Imputer(axis=0)
-        X = imp.fit_transform(df_sub)
-        X_centered = preprocessing.scale(X)
-
-        self.X = X_centered
-        self.columns = df_sub.columns.values
-
-    def fit_pca(self, n_components):
-        pca = PCA(n_components=n_components)
-        self.X = pca.fit_transform(self.X)
-        self.df_c = pd.DataFrame(pca.components_.T, index=self.crimes, columns=range(1, n_components + 1))
-
-        print pca.explained_variance_ratio_
+    def compenents(self, n_components):
+        self.df_c = pd.DataFrame(self.pipline['model'].components_.T, index=self.names, columns=range(1, self.pipline['model'].n_components + 1))
         return self.df_c
 
-    def sparse_pca(self, n_components, alpha):
-        pca = SparsePCA(n_components=3, alpha=alpha, n_jobs=-1)
-        self.X = pca.fit_transform(self.X)
-        self.df_c = pd.DataFrame(pca.components_.T, index=self.crimes, columns=range(1, n_components + 1))
-
-        return self.df_c
-
-    def best_cluster(self):
-        best = (0, 0, 0)
-        for i in [3, 4, 5, 6, 7, 8, 9, 10]:
+    def best_cluster(self, n_cluster_list):
+        best = (0,0, 0)
+        for i in n_cluster_list:
             clusterer = KMeans(n_clusters=i)
             cluster_labels = clusterer.fit_predict(self.X)
             silhouette_avg = silhouette_score(self.X, cluster_labels)
@@ -237,7 +112,8 @@ class ReduceFeatures(object):
             print "For n_clusters =", i, "The average silhouette_score is :", silhouette_avg
         self.best = best
 
-    def plot_embedding(self, dimensions, figsize=(12, 12), name_lim=15):
+
+    def plot_embedding(self, dimensions, figsize=(12, 12), name_lim=15, clusters):
         y = self.best[2]
         X = self.X
 

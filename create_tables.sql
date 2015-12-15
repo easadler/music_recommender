@@ -68,7 +68,7 @@ CREATE TABLE sample as
 WITH temp as(
 	SELECT userid FROM usa_plays 
 		where row_id in 
-			(SELECT round(random() * 3.634e6)::integer as id FROM generate_series(1, 1000)) 
+			(SELECT round(random() * 21e6)::integer as id FROM generate_series(1, 1000)) 
 		group by row_id 
 		limit 10000
 )
