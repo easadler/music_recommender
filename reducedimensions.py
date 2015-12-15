@@ -1,18 +1,18 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from collections import defaultdict
-
-from sklearn.decomposition import PCA, SparsePCA
-from sklearn import preprocessing
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator, TransformerMixin
-from scipy.cluster.hierarchy import linkage, fcluster
+from colwisecluster import CWHC
+import psycopg2 as pg2
+import pdb
 
 
-class ReduceFeatures(object):
+class DRPC(BaseEstimator, TransformerMixin):
     """Make 2d or 3d plots of principle components from scikit learn's PCA or
     SparsePCA models. Option to use scikit learn's KMeans model to color observations.
 
@@ -36,11 +36,18 @@ class ReduceFeatures(object):
             Set self.names and do preprocess data for dimension
             reduction.
         '''
-        self.model = model
-        self.scaler = scaler
+        if not model:
+            self.model = PCA(n_components=3)
+        else:
+            self.model = model
+
+        if not scaler:
+            self.scaler = StandardScaler()
+        else:
+            self.scaler = scaler
+
         self.cluster_model = cluster_model
         self.thresh = thresh
-
         if cluster_model:
             self.pipeline = Pipeline([('cluster_model', CWHC(thresh=0.5)), ('scaler', self.scaler), ('model', self.model)])
         else:
@@ -58,12 +65,16 @@ class ReduceFeatures(object):
         self : object
             Returns the instance itself.
         """
-        self.pipeline['cluster_model'].names = names
+        if isinstance(X, pd.DataFrame):
+            X = X.values
+        self.pipeline.named_steps['cluster_model'].names = names
         self._fit(X)
         return self
 
     def _fit(self, X):
         self.X_new = self.pipeline.fit_transform(X)
+        if self.cluster_model:
+            self.names = self.pipeline.named_steps['cluster_model'].names
         return self.X_new
 
     def fit_transform(self, X, names=None):
@@ -77,7 +88,11 @@ class ReduceFeatures(object):
         -------
         X_new : array-like, shape (n_samples, n_components)
         """
-        self.fit(X)
+        if isinstance(X, pd.DataFrame):
+            X = X.values
+        if self.cluster_model:
+            self.pipeline.named_steps['cluster_model'].names = np.array(names)
+        self.X_new = self._fit(X)
         return self.X_new
 
     def transform(self, X):
@@ -93,16 +108,18 @@ class ReduceFeatures(object):
         -------
         X_new : array-like, shape (n_samples, n_components)
         """
+        if isinstance(X, pd.DataFrame):
+            X = X.values
         if self.X_new:
-            self.X_new = self.pipline.transform(X)
+            self.X_new = self.pipeline.transform(X)
             return self.X_new
 
-    def compenents(self, n_components):
-        self.df_c = pd.DataFrame(self.pipline['model'].components_.T, index=self.names, columns=range(1, self.pipline['model'].n_components + 1))
+    def components(self):
+        self.df_c = pd.DataFrame(self.pipeline.named_steps['model'].components_.T, index=self.names, columns=range(1, self.pipeline.named_steps['model'].n_components + 1))
         return self.df_c
 
-    def best_cluster(self, n_cluster_list):
-        best = (0,0, 0)
+    def _cluster(self, n_cluster_list):
+        best = (0, 0, 0)
         for i in n_cluster_list:
             clusterer = KMeans(n_clusters=i)
             cluster_labels = clusterer.fit_predict(self.X)
@@ -111,10 +128,13 @@ class ReduceFeatures(object):
                 best = i, silhouette_avg, cluster_labels
             print "For n_clusters =", i, "The average silhouette_score is :", silhouette_avg
         self.best = best
+        return self.best
 
+    def plot_embedding(self, dimensions, figsize=(12, 12), name_lim=15, cluster_list = None):
+        if cluster_list:
+            best = self._cluster(cluster_list)
 
-    def plot_embedding(self, dimensions, figsize=(12, 12), name_lim=15, clusters):
-        y = self.best[2]
+        y = best[2]
         X = self.X
 
         if dimensions == 3:
@@ -129,6 +149,7 @@ class ReduceFeatures(object):
             ax.set_xlabel('X Label')
             ax.set_ylabel('Y Label')
             ax.set_zlabel('Z Label')
+
         elif dimensions == 2:
             plt.figure(figsize=(12, 12), dpi=250)
             ax = plt.subplot(111)
@@ -140,3 +161,23 @@ class ReduceFeatures(object):
             ax.set_xlabel('X Label')
             ax.set_ylabel('Y Label')
         plt.show()
+
+
+if __name__ == '__main__':
+    # Connect to psql database
+    conn = pg2.connect(dbname='lastfm', user='evansadler', host='/tmp')
+    c = conn.cursor()
+    query = 'SELECT * FROM sample;'
+    df_t = pd.read_sql_query(query, conn)
+    df_piv = df_t.groupby(['userid', 'artist'])['plays'].mean().reset_index().pivot(index='userid', columns='artist', values='plays')
+    df_piv = df_piv[df_piv < 1000]
+
+    summary = df_piv.dropna(thresh=70, axis=1)
+    summary = summary.fillna(0)
+    names = list(summary.columns)
+    X = summary.values
+    # ss = StandardScaler()
+    # X = ss.fit_transform(X)
+    clf = DRPC(cluster_model=True)
+    print clf.fit_transform(X, names)
+    print clf.components()

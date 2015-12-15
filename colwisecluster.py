@@ -2,8 +2,6 @@ import numpy as np
 from collections import defaultdict
 from sklearn.base import BaseEstimator, TransformerMixin
 from scipy.cluster.hierarchy import linkage, fcluster
-from sklearn.preprocessing import StandardScaler
-
 import psycopg2 as pg2
 import pandas as pd
 import numpy as np
