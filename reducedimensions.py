@@ -7,9 +7,9 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator, TransformerMixin
+from mpl_toolkits.mplot3d import Axes3D
 from colwisecluster import CWHC
 import psycopg2 as pg2
-import pdb
 
 
 class DRPC(BaseEstimator, TransformerMixin):
@@ -48,6 +48,7 @@ class DRPC(BaseEstimator, TransformerMixin):
 
         self.cluster_model = cluster_model
         self.thresh = thresh
+
         if cluster_model:
             self.pipeline = Pipeline([('cluster_model', CWHC(thresh=0.5)), ('scaler', self.scaler), ('model', self.model)])
         else:
@@ -67,14 +68,20 @@ class DRPC(BaseEstimator, TransformerMixin):
         """
         if isinstance(X, pd.DataFrame):
             X = X.values
-        self.pipeline.named_steps['cluster_model'].names = names
+
+        if self.cluster_model and names:
+            self.pipeline.named_steps['cluster_model'].names = np.array(names)
+        elif names:
+            self.names = np.array(names)
+
         self._fit(X)
         return self
 
     def _fit(self, X):
         self.X_new = self.pipeline.fit_transform(X)
+
         if self.cluster_model:
-            self.names = self.pipeline.named_steps['cluster_model'].names
+            self.names = self.pipeline.named_steps['cluster_model'].new_names
         return self.X_new
 
     def fit_transform(self, X, names=None):
@@ -90,8 +97,12 @@ class DRPC(BaseEstimator, TransformerMixin):
         """
         if isinstance(X, pd.DataFrame):
             X = X.values
-        if self.cluster_model:
+
+        if self.cluster_model and names:
             self.pipeline.named_steps['cluster_model'].names = np.array(names)
+        elif names:
+            self.names = np.array(names)
+
         self.X_new = self._fit(X)
         return self.X_new
 
@@ -122,27 +133,33 @@ class DRPC(BaseEstimator, TransformerMixin):
         best = (0, 0, 0)
         for i in n_cluster_list:
             clusterer = KMeans(n_clusters=i)
-            cluster_labels = clusterer.fit_predict(self.X)
-            silhouette_avg = silhouette_score(self.X, cluster_labels)
+            cluster_labels = clusterer.fit_predict(self.X_new)
+            silhouette_avg = silhouette_score(self.X_new, cluster_labels)
             if abs(silhouette_avg) > best[1]:
                 best = i, silhouette_avg, cluster_labels
             print "For n_clusters =", i, "The average silhouette_score is :", silhouette_avg
         self.best = best
         return self.best
 
-    def plot_embedding(self, dimensions, figsize=(12, 12), name_lim=15, cluster_list = None):
+    def plot_embedding(self, dimensions, col_names=None, figsize=(12, 12), name_lim=15, cluster_list = False, fontsize = 8):
         if cluster_list:
             best = self._cluster(cluster_list)
+            y = best[2]
+        else:
+            y = np.zeros(self.X_new.shape[0])
 
-        y = best[2]
-        X = self.X
+        if not col_names:
+            col_names = np.chararray(self.X_new.shape[0])
+            col_names[:] = '*'
+
+        X = self.X_new
 
         if dimensions == 3:
             fig = plt.figure(figsize=figsize, dpi=250)
             ax = fig.add_subplot(111, projection='3d')
 
             for i in range(X.shape[0]):
-                ax.text(X[i, 0], X[i, 1], X[i, 2], str(self.names[i][0:name_lim]), color=plt.cm.Set1(y[i] / 10.), fontsizes=8)
+                ax.text(X[i, 0], X[i, 1], X[i, 2], str(col_names[i][0:name_lim]), color=plt.cm.Set1(y[i] / 10.), fontsize=fontsize)
             ax.set_xlim3d(X[:, 0].min(), X[:, 0].max())
             ax.set_ylim3d(X[:, 1].min(), X[:, 1].max())
             ax.set_zlim3d(X[:, 2].min(), X[:, 2].max())
@@ -155,7 +172,7 @@ class DRPC(BaseEstimator, TransformerMixin):
             ax = plt.subplot(111)
 
             for i in range(X.shape[0]):
-                ax.text(X[i, 0], X[i, 1], str(self.names[i][0:name_lim]), color=plt.cm.Set1(y[i] / 10.), fontsize=8)
+                ax.text(X[i, 0], X[i, 1], str(self.names[i][0:name_lim]), color=plt.cm.Set1(y[i] / 10.), fontsize=fontsize)
             ax.set_xlim(X[:, 0].min(), X[:, 0].max())
             ax.set_ylim(X[:, 1].min(), X[:, 1].max())
             ax.set_xlabel('X Label')
@@ -179,5 +196,5 @@ if __name__ == '__main__':
     # ss = StandardScaler()
     # X = ss.fit_transform(X)
     clf = DRPC(cluster_model=True)
-    print clf.fit_transform(X, names)
+    print clf.fit_transform(X, names=names)
     print clf.components()
