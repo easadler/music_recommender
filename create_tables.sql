@@ -25,16 +25,45 @@ CREATE TABLE users (
 \copy users FROM '/Users/evansadler/Desktop/recommender/lastfm-dataset-360K/usersha1-profile.tsv' WITH (FORMAT CSV, DELIMITER E'\t');
 
 
+#remove various artists
+### CREATE artist id table
+CREATE TABLE artists AS (
+	SELECT COUNT(artist) as cnt, artist FROM sample
+	GROUP BY artist
+	HAVING COUNT(artist) > 10
+);
+
+ALTER TABLE artists ADD COLUMN artistid SERIAL PRIMARY KEY;
+
+
+CREATE TABLE pairs AS 
+WITH temp as (
+	SELECT artists.artist, artists.artistid, big_sample.userid FROM big_sample
+	INNER JOIN artists
+	ON artists.artist = big_sample.artist
+), temp2 as (
+select a1.artist as artist1, a2.artist as artist2, a1.artistid, a2.artistid from temp as a1
+left join temp as a2
+on a1.userid = a2.userid
+WHERE a1.artistid < a2.artistid
+)
+
+SELECT COUNT(*), artist1, artist2
+FROM temp2 
+GROUP BY artist1, artist2; 
+
+
+
 ######## SAMPLING ###########
 
 # get 10,000 random samples
-SELECT * FROM users
+SELECT * FROM usa_plays
 where row_id IN (
   SELECT round(random() * 21e6)::integer AS id
-  FROM generate_series(1, 11000)
+  FROM generate_series(1, 51000)
   GROUP BY id
 )
-LIMIT 10000;
+LIMIT 50000;
 
 
 
@@ -64,11 +93,11 @@ SELECT COUNT(distinct(artist)) FROM usa_plays;
 
 
 
-CREATE TABLE sample as
+CREATE TABLE big_sample as
 WITH temp as(
 	SELECT userid FROM usa_plays 
 		where row_id in 
-			(SELECT round(random() * 21e6)::integer as id FROM generate_series(1, 1000)) 
+			(SELECT round(random() * 21e6)::integer as id FROM generate_series(1, 10100)) 
 		group by row_id 
 		limit 10000
 )
